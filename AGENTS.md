@@ -1,9 +1,33 @@
-<!-- BEGIN:nextjs-agent-rules -->
+# CV Analyzer Project Rules
 
-## This is NOT the Next.js you know
+## Project Purpose
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+This is an AI-powered CV Analyzer.
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+The user uploads a CV.
+The application extracts the CV content.
+The AI analyzes the CV.
+The application displays the analysis results.
 
-<!-- END:nextjs-agent-rules -->
+## Technology
+
+- Next.js
+- TypeScript
+- React
+- Tailwind CSS
+
+## AI Rules
+
+- Do not use the OpenAI API.
+- Prefer free API options.
+- Do not introduce paid services without explicit approval.
+- Consider local AI models when appropriate.
+
+## Development Rules
+
+- Keep the implementation simple and understandable.
+- Do not add unnecessary dependencies.
+- Do not modify unrelated files.
+- Follow the existing project structure.
+- Implement features incrementally.
+- Explain important changes when completing a task.
