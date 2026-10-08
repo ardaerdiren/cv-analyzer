@@ -1,3 +1,9 @@
+"use client";
+
+import { useState, type ChangeEvent } from "react";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
 const benefits = [
   {
     number: "01",
@@ -44,6 +50,34 @@ function DocumentIcon() {
 }
 
 export default function Home() {
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    const hasPdfExtension = file.name.toLowerCase().endsWith(".pdf");
+    const hasValidMimeType = !file.type || file.type === "application/pdf";
+
+    if (!hasPdfExtension || !hasValidMimeType) {
+      setSelectedFileName(null);
+      setFileError("Please choose a PDF file.");
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      setSelectedFileName(null);
+      setFileError("This file is larger than 10 MB. Please choose a smaller PDF.");
+      return;
+    }
+
+    setFileError(null);
+    setSelectedFileName(file.name);
+  }
+
   return (
     <div className="min-h-screen bg-[#faf9f6] text-stone-900">
       <header className="border-b border-stone-200/80">
@@ -102,26 +136,43 @@ export default function Home() {
               <h2 className="text-sm font-semibold">Start with your CV</h2>
               <span className="text-xs text-stone-500">Step 1 of 1</span>
             </div>
-            <div
-              aria-label="CV upload area. PDF files up to 10 MB. Upload is not enabled yet."
-              className="flex min-h-[290px] flex-col items-center justify-center border border-dashed border-stone-300 bg-white px-6 py-10 text-center transition-colors hover:border-stone-500 sm:min-h-[320px]"
+            <input
+              id="cv-file"
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={handleFileChange}
+              aria-describedby="cv-file-guidance cv-file-status"
+              className="peer sr-only"
+            />
+            <label
+              htmlFor="cv-file"
+              className="flex min-h-[290px] cursor-pointer flex-col items-center justify-center border border-dashed border-stone-300 bg-white px-6 py-10 text-center transition-colors hover:border-stone-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-stone-700 sm:min-h-[320px]"
             >
               <DocumentIcon />
-              <p className="mt-5 text-base font-medium">Your next opportunity starts here</p>
-              <p className="mt-2 max-w-xs text-sm leading-6 text-stone-500">
-                Add your CV to see a clear overview of its strengths and areas
-                to improve.
+              <p className="mt-5 text-base font-medium">
+                {selectedFileName ? "Your CV is ready" : "Your next opportunity starts here"}
+              </p>
+              <p className="mt-2 max-w-xs break-all text-sm leading-6 text-stone-500">
+                {selectedFileName ??
+                  "Add your CV to see a clear overview of its strengths and areas to improve."}
               </p>
               <span className="mt-6 inline-flex min-h-11 items-center justify-center border border-stone-300 px-5 text-sm font-medium text-stone-700">
-                Choose a PDF
+                {selectedFileName ? "Choose another PDF" : "Choose a PDF"}
               </span>
-              <p className="mt-3 text-xs text-stone-500">
+              <p id="cv-file-guidance" className="mt-3 text-xs text-stone-500">
                 PDF format <span aria-hidden="true">·</span> Maximum file size 10 MB
               </p>
-            </div>
-            <p className="mt-3 text-xs leading-5 text-stone-500">
-              Uploading is not available yet. This area is a preview of the
-              future workflow.
+            </label>
+            <p
+              id="cv-file-status"
+              role={fileError ? "alert" : "status"}
+              aria-live="polite"
+              className={`mt-3 text-xs leading-5 ${fileError ? "text-red-700" : "text-stone-500"}`}
+            >
+              {fileError ??
+                (selectedFileName
+                  ? "Selected locally only. Upload and analysis are not connected yet."
+                  : "No file is uploaded. Selection is only previewed in this page.")}
             </p>
           </div>
         </section>
