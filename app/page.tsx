@@ -52,8 +52,10 @@ function DocumentIcon() {
 export default function Home() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState<string | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
 
@@ -64,18 +66,58 @@ export default function Home() {
 
     if (!hasPdfExtension || !hasValidMimeType) {
       setSelectedFileName(null);
+      setExtractedText(null);
       setFileError("Please choose a PDF file.");
       return;
     }
 
     if (file.size > MAX_FILE_SIZE) {
       setSelectedFileName(null);
+      setExtractedText(null);
       setFileError("This file is larger than 10 MB. Please choose a smaller PDF.");
       return;
     }
 
-    setFileError(null);
     setSelectedFileName(file.name);
+    setFileError(null);
+    setExtractedText(null);
+    setIsExtracting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        body: formData,
+      });
+      const result = (await response.json()) as {
+        text?: unknown;
+        error?: unknown;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          typeof result.error === "string"
+            ? result.error
+            : "The PDF could not be processed. Please try again.",
+        );
+      }
+
+      if (typeof result.text !== "string") {
+        throw new Error("The server returned an invalid response.");
+      }
+
+      setExtractedText(result.text);
+    } catch (error) {
+      setFileError(
+        error instanceof Error
+          ? error.message
+          : "The PDF could not be processed. Please try again.",
+      );
+    } finally {
+      setIsExtracting(false);
+    }
   }
 
   return (
@@ -141,6 +183,7 @@ export default function Home() {
               type="file"
               accept=".pdf,application/pdf"
               onChange={handleFileChange}
+              disabled={isExtracting}
               aria-describedby="cv-file-guidance cv-file-status"
               className="peer sr-only"
             />
@@ -150,14 +193,22 @@ export default function Home() {
             >
               <DocumentIcon />
               <p className="mt-5 text-base font-medium">
-                {selectedFileName ? "Your CV is ready" : "Your next opportunity starts here"}
+                {isExtracting
+                  ? "Reading your CV…"
+                  : selectedFileName
+                    ? "Your CV is ready"
+                    : "Your next opportunity starts here"}
               </p>
               <p className="mt-2 max-w-xs break-all text-sm leading-6 text-stone-500">
                 {selectedFileName ??
                   "Add your CV to see a clear overview of its strengths and areas to improve."}
               </p>
               <span className="mt-6 inline-flex min-h-11 items-center justify-center border border-stone-300 px-5 text-sm font-medium text-stone-700">
-                {selectedFileName ? "Choose another PDF" : "Choose a PDF"}
+                {isExtracting
+                  ? "Extracting text…"
+                  : selectedFileName
+                    ? "Choose another PDF"
+                    : "Choose a PDF"}
               </span>
               <p id="cv-file-guidance" className="mt-3 text-xs text-stone-500">
                 PDF format <span aria-hidden="true">·</span> Maximum file size 10 MB
@@ -170,10 +221,33 @@ export default function Home() {
               className={`mt-3 text-xs leading-5 ${fileError ? "text-red-700" : "text-stone-500"}`}
             >
               {fileError ??
-                (selectedFileName
-                  ? "Selected locally only. Upload and analysis are not connected yet."
-                  : "No file is uploaded. Selection is only previewed in this page.")}
+                (isExtracting
+                  ? "Extracting text from your PDF. Please wait."
+                  : selectedFileName
+                    ? "Text extraction is complete. No AI analysis has been run."
+                    : "Select a PDF to extract its text. Files are processed in memory and not saved.")}
             </p>
+            {extractedText !== null && (
+              <section
+                aria-labelledby="extracted-text-heading"
+                aria-live="polite"
+                className="mt-6 border border-stone-200 bg-white p-5 sm:p-6"
+              >
+                <h3 id="extracted-text-heading" className="text-sm font-semibold">
+                  Extracted text
+                </h3>
+                {extractedText.trim() ? (
+                  <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-stone-700">
+                    {extractedText}
+                  </pre>
+                ) : (
+                  <p className="mt-4 text-sm leading-6 text-stone-500">
+                    No selectable text was found in this PDF. Scanned documents
+                    may require OCR.
+                  </p>
+                )}
+              </section>
+            )}
           </div>
         </section>
 
