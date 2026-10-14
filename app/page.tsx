@@ -49,6 +49,27 @@ function DocumentIcon() {
   );
 }
 
+function getAnalysisErrorMessage(status: number) {
+  switch (status) {
+    case 400:
+      return "The extracted CV text could not be analyzed. Please choose another PDF.";
+    case 401:
+      return "The Gemini API key was not accepted. Please check the server configuration.";
+    case 403:
+      return "Gemini access was denied for this project.";
+    case 404:
+      return "The configured Gemini model is not available for this project.";
+    case 413:
+      return "This CV contains too much text to analyze.";
+    case 429:
+      return "The Gemini quota or rate limit has been reached. Please try again later.";
+    case 503:
+      return "The Gemini service is not configured or is temporarily unavailable.";
+    default:
+      return "We couldn't analyze your CV. Please try again later.";
+  }
+}
+
 type Analysis = {
   overallAssessment: string;
   strengths: string[];
@@ -61,14 +82,16 @@ type Analysis = {
 function AnalysisSection({
   title,
   children,
+  className,
 }: {
   title: string;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section>
-      <h4 className="text-sm font-semibold">{title}</h4>
-      <div className="mt-2 space-y-1 text-sm leading-6 text-stone-600">{children}</div>
+    <section className={className}>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <div className="mt-3 space-y-1 text-sm leading-6 text-stone-600">{children}</div>
     </section>
   );
 }
@@ -88,82 +111,38 @@ function AnalysisList({ items }: { items: string[] }) {
 export default function Home() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  const [extractedText, setExtractedText] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const analysisInFlight = useRef(false);
-
-  async function handleAnalyze() {
-    if (!extractedText?.trim() || analysisInFlight.current) return;
-
-    analysisInFlight.current = true;
-    setIsAnalyzing(true);
-    setAnalysisError(null);
-    setAnalysis(null);
-
-    try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: extractedText }),
-      });
-      const result = (await response.json()) as {
-        analysis?: Analysis;
-        error?: string;
-      };
-
-      if (!response.ok) {
-        setAnalysisError(result.error ?? "CV analizi tamamlanamadı.");
-        return;
-      }
-      if (!result.analysis) {
-        setAnalysisError("Sunucudan geçerli bir analiz alınamadı.");
-        return;
-      }
-
-      setAnalysis(result.analysis);
-    } catch {
-      setAnalysisError("Gemini hizmetine ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.");
-    } finally {
-      analysisInFlight.current = false;
-      setIsAnalyzing(false);
-    }
-  }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
 
-    if (!file) return;
+    if (!file || analysisInFlight.current) return;
 
     const hasPdfExtension = file.name.toLowerCase().endsWith(".pdf");
     const hasValidMimeType = !file.type || file.type === "application/pdf";
 
     if (!hasPdfExtension || !hasValidMimeType) {
       setSelectedFileName(null);
-      setExtractedText(null);
       setAnalysis(null);
-      setAnalysisError(null);
       setFileError("Please choose a PDF file.");
       return;
     }
 
     if (file.size > MAX_FILE_SIZE) {
       setSelectedFileName(null);
-      setExtractedText(null);
       setAnalysis(null);
-      setAnalysisError(null);
       setFileError("This file is larger than 10 MB. Please choose a smaller PDF.");
       return;
     }
 
+    analysisInFlight.current = true;
     setSelectedFileName(file.name);
     setFileError(null);
-    setExtractedText(null);
     setAnalysis(null);
-    setAnalysisError(null);
     setIsExtracting(true);
 
     try {
@@ -188,10 +167,33 @@ export default function Home() {
       }
 
       if (typeof result.text !== "string") {
-        throw new Error("The server returned an invalid response.");
+        throw new Error("The PDF could not be processed. Please try again.");
       }
 
-      setExtractedText(result.text);
+      if (!result.text.trim()) {
+        throw new Error("No selectable text was found in this PDF. Scanned PDFs may require OCR.");
+      }
+
+      setIsExtracting(false);
+      setIsAnalyzing(true);
+
+      const analysisResponse = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: result.text }),
+      });
+      const analysisResult = (await analysisResponse.json()) as {
+        analysis?: Analysis;
+      };
+
+      if (!analysisResponse.ok) {
+        throw new Error(getAnalysisErrorMessage(analysisResponse.status));
+      }
+      if (!analysisResult.analysis) {
+        throw new Error("The analysis response was invalid. Please try again.");
+      }
+
+      setAnalysis(analysisResult.analysis);
     } catch (error) {
       setFileError(
         error instanceof Error
@@ -199,7 +201,9 @@ export default function Home() {
           : "The PDF could not be processed. Please try again.",
       );
     } finally {
+      analysisInFlight.current = false;
       setIsExtracting(false);
+      setIsAnalyzing(false);
     }
   }
 
@@ -277,7 +281,9 @@ export default function Home() {
               <DocumentIcon />
               <p className="mt-5 text-base font-medium">
                 {isExtracting
-                  ? "Reading your CV…"
+                  ? "Extracting text…"
+                  : isAnalyzing
+                    ? "Analyzing your CV…"
                   : selectedFileName
                     ? "Your CV is ready"
                     : "Your next opportunity starts here"}
@@ -287,11 +293,17 @@ export default function Home() {
                   "Add your CV to see a clear overview of its strengths and areas to improve."}
               </p>
               <span className="mt-6 inline-flex min-h-11 items-center justify-center border border-stone-300 px-5 text-sm font-medium text-stone-700">
-                {isExtracting
-                  ? "Extracting text…"
-                  : selectedFileName
-                    ? "Choose another PDF"
-                    : "Choose a PDF"}
+                {isExtracting || isAnalyzing ? (
+                  <>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="mr-2 h-4 w-4 animate-spin">
+                      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                      <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="3" />
+                    </svg>
+                    {isExtracting ? "Extracting text…" : "Analyzing your CV…"}
+                  </>
+                ) : (
+                  "Choose a PDF & Analyze"
+                )}
               </span>
               <p id="cv-file-guidance" className="mt-3 text-xs text-stone-500">
                 PDF format <span aria-hidden="true">·</span> Maximum file size 10 MB
@@ -305,82 +317,94 @@ export default function Home() {
             >
               {fileError ??
                 (isExtracting
-                  ? "Extracting text from your PDF. Please wait."
-                  : selectedFileName
-                    ? "Text extraction is complete. No AI analysis has been run."
-                    : "Select a PDF to extract its text. Files are processed in memory and not saved.")}
+                  ? "Extracting text…"
+                  : isAnalyzing
+                    ? "Analyzing your CV…"
+                    : analysis
+                      ? "Analysis complete"
+                      : "PDF only · Maximum file size 10 MB. Files are processed in memory and not saved.")}
             </p>
-            {extractedText !== null && (
-              <section
-                aria-labelledby="extracted-text-heading"
-                aria-live="polite"
-                className="mt-6 border border-stone-200 bg-white p-5 sm:p-6"
-              >
-                <h3 id="extracted-text-heading" className="text-sm font-semibold">
-                  Extracted text
-                </h3>
-                {extractedText.trim() ? (
-                  <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-stone-700">
-                    {extractedText}
-                  </pre>
-                ) : (
-                  <p className="mt-4 text-sm leading-6 text-stone-500">
-                    No selectable text was found in this PDF. Scanned documents
-                    may require OCR.
-                  </p>
-                )}
-                {extractedText.trim() && (
-                  <div className="mt-5 border-t border-stone-200 pt-5">
-                    <p className="mb-3 text-xs leading-5 text-stone-500">
-                      Analiz için CV metni Google Gemini API&apos;ye gönderilir.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleAnalyze}
-                      disabled={isAnalyzing}
-                      className="min-h-11 border border-stone-800 bg-stone-900 px-5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-wait disabled:opacity-60"
-                    >
-                      {isAnalyzing ? "CV analiz ediliyor…" : "CV’mi analiz et"}
-                    </button>
-                    {analysisError && (
-                      <p role="alert" className="mt-3 text-sm text-red-700">
-                        {analysisError}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {analysis && (
-                  <div className="mt-6 space-y-6 border-t border-stone-200 pt-6" aria-live="polite">
-                    <h3 className="text-lg font-semibold">CV analiziniz</h3>
-                    <AnalysisSection title="Genel değerlendirme">
-                      <p>{analysis.overallAssessment}</p>
-                    </AnalysisSection>
-                    <AnalysisSection title="Güçlü yönler">
-                      <AnalysisList items={analysis.strengths} />
-                    </AnalysisSection>
-                    <AnalysisSection title="Geliştirilebilecek yönler">
-                      <AnalysisList items={analysis.improvements} />
-                    </AnalysisSection>
-                    <AnalysisSection title="Beceriler">
-                      <p className="font-medium">Teknik beceriler</p>
-                      <AnalysisList items={analysis.skills.technical} />
-                      <p className="mt-3 font-medium">Kişisel beceriler</p>
-                      <AnalysisList items={analysis.skills.personal} />
-                    </AnalysisSection>
-                    <AnalysisSection title="Somut iyileştirme önerileri">
-                      <AnalysisList items={analysis.recommendations} />
-                    </AnalysisSection>
-                    {analysis.uncertainties.length > 0 && (
-                      <AnalysisSection title="Belirsiz veya doğrulanamayan bilgiler">
-                        <AnalysisList items={analysis.uncertainties} />
-                      </AnalysisSection>
-                    )}
-                  </div>
-                )}
-              </section>
-            )}
           </div>
         </section>
+
+        {analysis && (
+          <section
+            aria-labelledby="analysis-results-heading"
+            aria-live="polite"
+            className="mx-auto max-w-7xl px-6 pb-20 sm:px-10"
+          >
+            <div className="border-t border-stone-300 pt-10 sm:pt-12">
+              <h2
+                id="analysis-results-heading"
+                className="mb-6 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl"
+              >
+                CV analiziniz
+              </h2>
+
+              <div className="space-y-5 sm:space-y-6">
+                <AnalysisSection
+                  title="Genel değerlendirme"
+                  className="border border-stone-200 bg-white p-5 sm:p-7"
+                >
+                  <p className="max-w-5xl text-base leading-7 text-stone-700">
+                    {analysis.overallAssessment}
+                  </p>
+                </AnalysisSection>
+
+                <div className="grid gap-5 lg:grid-cols-2 sm:gap-6">
+                  <AnalysisSection
+                    title="Güçlü yönler"
+                    className="border border-stone-200 bg-white p-5 sm:p-7"
+                  >
+                    <AnalysisList items={analysis.strengths} />
+                  </AnalysisSection>
+                  <AnalysisSection
+                    title="Geliştirilebilecek yönler"
+                    className="border border-stone-200 bg-white p-5 sm:p-7"
+                  >
+                    <AnalysisList items={analysis.improvements} />
+                  </AnalysisSection>
+                </div>
+
+                <AnalysisSection
+                  title="Beceriler"
+                  className="border border-stone-200 bg-white p-5 sm:p-7"
+                >
+                  <div className="grid gap-5 sm:grid-cols-2 sm:gap-8">
+                    <div>
+                      <h4 className="font-medium text-stone-800">Teknik beceriler</h4>
+                      <div className="mt-2">
+                        <AnalysisList items={analysis.skills.technical} />
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-stone-800">Kişisel beceriler</h4>
+                      <div className="mt-2">
+                        <AnalysisList items={analysis.skills.personal} />
+                      </div>
+                    </div>
+                  </div>
+                </AnalysisSection>
+
+                <AnalysisSection
+                  title="Somut iyileştirme önerileri"
+                  className="border border-stone-200 bg-white p-5 sm:p-7"
+                >
+                  <AnalysisList items={analysis.recommendations} />
+                </AnalysisSection>
+
+                {analysis.uncertainties.length > 0 && (
+                  <AnalysisSection
+                    title="Belirsiz veya doğrulanamayan bilgiler"
+                    className="border border-stone-200 bg-white p-5 sm:p-7"
+                  >
+                    <AnalysisList items={analysis.uncertainties} />
+                  </AnalysisSection>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         <section id="about" className="border-t border-stone-200 bg-white">
           <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10 sm:py-20">
